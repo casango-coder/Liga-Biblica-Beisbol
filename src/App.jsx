@@ -3,20 +3,20 @@ import confetti from 'canvas-confetti';
 import './App.css';
 
 function App() {
-  // --- ESTADOS ---
-  const [pantalla, setPantalla] = useState('inicio'); // 'inicio', 'host', 'proyeccion', 'fin'
+  // Comprobamos si la ventana se abrió en modo proyección
+  const esProyeccion = window.location.search.includes('proyeccion=true');
+
+  const [pantalla, setPantalla] = useState(esProyeccion ? 'proyeccion' : 'inicio');
   const [bancoPreguntas, setBancoPreguntas] = useState(() => {
     const guardadas = localStorage.getItem('lbb_preguntas');
     return guardadas ? JSON.parse(guardadas) : [];
   });
 
-  // Creador de preguntas
   const [nuevaPregunta, setNuevaPregunta] = useState('');
   const [nuevasOpciones, setNuevasOpciones] = useState(['', '', '', '']);
   const [tipoRespuesta, setTipoRespuesta] = useState('multiple');
   const [dificultad, setDificultad] = useState('hit');
 
-  // Juego
   const [preguntaActual, setPreguntaActual] = useState(null);
   const [batazoActual, setBatazoActual] = useState(null);
   const [scoreA, setScoreA] = useState(0);
@@ -27,16 +27,45 @@ function App() {
   const [equipoBate, setEquipoBate] = useState('Azul');
   const [bases, setBases] = useState({ primera: false, segunda: false, tercera: false });
 
-  // Temporizador
   const [tiempo, setTiempo] = useState(30);
   const [timerActivo, setTimerActivo] = useState(false);
+
+  // --- SINCRONIZACIÓN ENTRE VENTANAS ---
+  // Escuchar cambios en localStorage para actualizar la proyección
+  useEffect(() => {
+    const sincronizar = () => {
+      const estadoGuardado = JSON.parse(localStorage.getItem('lbb_estado'));
+      if (estadoGuardado) {
+        setPreguntaActual(estadoGuardado.preguntaActual);
+        setBatazoActual(estadoGuardado.batazoActual);
+        setScoreA(estadoGuardado.scoreA);
+        setScoreB(estadoGuardado.scoreB);
+        setOuts(estadoGuardado.outs);
+        setStrikes(estadoGuardado.strikes);
+        setInning(estadoGuardado.inning);
+        setEquipoBate(estadoGuardado.equipoBate);
+        setBases(estadoGuardado.bases);
+        setTiempo(estadoGuardado.tiempo);
+      }
+    };
+
+    window.addEventListener('storage', sincronizar);
+    return () => window.removeEventListener('storage', sincronizar);
+  }, []);
+
+  // Guardar el estado cada vez que cambie algo
+  useEffect(() => {
+    if (!esProyeccion) {
+      const estado = { preguntaActual, batazoActual, scoreA, scoreB, outs, strikes, inning, equipoBate, bases, tiempo };
+      localStorage.setItem('lbb_estado', JSON.stringify(estado));
+    }
+  }, [preguntaActual, batazoActual, scoreA, scoreB, outs, strikes, inning, equipoBate, bases, tiempo, esProyeccion]);
 
   // Guardar preguntas
   useEffect(() => {
     localStorage.setItem('lbb_preguntas', JSON.stringify(bancoPreguntas));
   }, [bancoPreguntas]);
 
-  // Lógica del temporizador
   useEffect(() => {
     let interval = null;
     if (timerActivo && tiempo > 0) {
@@ -47,7 +76,6 @@ function App() {
     return () => clearInterval(interval);
   }, [timerActivo, tiempo]);
 
-  // --- EDITOR DE PREGUNTAS ---
   const agregarPregunta = () => {
     if (nuevaPregunta.trim() === '') return alert("Escribe la pregunta");
     const nueva = {
@@ -63,10 +91,18 @@ function App() {
     setPantalla('host');
   };
 
-  // --- LANZAR PREGUNTA ---
   const lanzarPregunta = (dificultadElegida) => {
+    // NUEVO: Si no hay preguntas en absoluto, terminar el juego
+    if (bancoPreguntas.length === 0) {
+      alert("¡No quedan más preguntas en el banco! El juego ha terminado.");
+      setPantalla('fin');
+      return;
+    }
+
     const disponibles = bancoPreguntas.filter(p => p.dificultad === dificultadElegida);
-    if (disponibles.length === 0) return alert(`No quedan preguntas de ${dificultadElegida.toUpperCase()}`);
+    if (disponibles.length === 0) {
+      return alert(`No quedan preguntas de tipo ${dificultadElegida.toUpperCase()}. Intenta con otra dificultad.`);
+    }
 
     const indiceAzar = Math.floor(Math.random() * disponibles.length);
     const preguntaSeleccionada = disponibles[indiceAzar];
@@ -76,8 +112,6 @@ function App() {
     setBatazoActual(dificultadElegida);
     setTiempo(30); setTimerActivo(false);
   };
-
-  // --- RESOLVER JUGADA ---
   const resolverJugada = (esCorrecto) => {
     if (!preguntaActual) return;
 
@@ -130,7 +164,7 @@ function App() {
   if (pantalla === 'fin') {
     return (
         <div className="fin-juego-container">
-          <h1>🏆 ¡FIN DEL JUEGO! 🏆</h1>
+          <h1> ¡FIN DEL JUEGO! </h1>
           <div className="resultado-final">
             <div className={scoreA >= scoreB ? 'ganador' : ''}>
               <h2>Equipo Azul</h2><p className="score-final">{scoreA}</p>
@@ -140,7 +174,18 @@ function App() {
             </div>
           </div>
           <h2 className="anuncio-ganador">{scoreA > scoreB ? '¡Ganó el Equipo Azul!' : scoreB > scoreA ? '¡Ganó el Equipo Rojo!' : '¡Empate!'}</h2>
-          <button onClick={() => window.location.reload()} className="btn-primario" style={{padding: '20px 40px', fontSize: '1.5rem'}}>Jugar de Nuevo</button>
+          <button
+              onClick={() => {
+                // Reiniciar todos los estados
+                setScoreA(0); setScoreB(0); setOuts(0); setStrikes(0);
+                setInning(1); setEquipoBate('Azul');
+                setBases({ primera: false, segunda: false, tercera: false });
+                setPantalla('inicio');
+                localStorage.removeItem('lbb_estado'); // Limpiar estado guardado
+              }}
+              className="btn-primario" style={{padding: '20px 40px', fontSize: '1.5rem'}}>
+            Jugar de Nuevo
+          </button>
         </div>
     );
   }
@@ -148,7 +193,7 @@ function App() {
   if (pantalla === 'inicio') {
     return (
         <div className="app-container dark-mode">
-          <h1 style={{color: '#F4F4F9', textAlign: 'center', marginBottom: '30px'}}>⚾ Configuración LBB</h1>
+          <h1 style={{color: '#F4F4F9', textAlign: 'center', marginBottom: '30px'}}> Configuración LBB</h1>
           <div className="card">
             <h2>Cargar Nueva Pregunta ({bancoPreguntas.length} en banco)</h2>
             <input type="text" placeholder="Escribe la pregunta aquí..." value={nuevaPregunta} onChange={(e) => setNuevaPregunta(e.target.value)} className="input-text"/>
@@ -173,7 +218,7 @@ function App() {
             <button onClick={agregarPregunta} className="btn-primario" style={{marginTop: '20px', width: '100%'}}>+ Añadir Pregunta</button>
           </div>
           <button onClick={empezarJuego} className="btn-exito" style={{width: '100%', fontSize: '1.5rem', padding: '25px', marginTop: '20px'}}>
-            🎮 INICIAR PARTIDO
+            INICIAR PARTIDO
           </button>
         </div>
     );
@@ -181,7 +226,7 @@ function App() {
 
   if (pantalla === 'proyeccion') {
     return (
-        <div className="proyeccion-container" onClick={() => setPantalla('host')}>
+        <div className="proyeccion-container">
           <div className="proy-header">
             <span className="proy-inning">INNING {inning}</span>
             <span className="proy-score">AZUL <span className="score-num">{scoreA}</span> - <span className="score-num">{scoreB}</span> ROJO</span>
@@ -215,23 +260,29 @@ function App() {
               </div>
             </div>
           </div>
-          <p className="click-to-exit">Clic para volver al Panel del Host</p>
         </div>
     );
   }
 
-  // --- PANEL DEL HOST (NUEVO DISEÑO PRO) ---
   return (
       <div className="app-container dark-mode">
         <header className="host-header">
-          <h1>⚾ PANEL DEL HOST</h1>
-          <button onClick={() => setPantalla('proyeccion')} className="btn-proyectar">
-            📺 Abrir Proyección
-          </button>
+          <h1> PANEL DEL HOST</h1>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+                onClick={() => { if(window.confirm('¿Seguro que quieres terminar el partido?')) setPantalla('fin'); }}
+                className="btn-proyectar"
+                style={{ background: 'var(--accent-red)', borderColor: 'var(--accent-red)' }}>
+               Finalizar Partido
+            </button>
+
+            <button onClick={() => window.open(window.location.origin + '?proyeccion=true', '_blank')} className="btn-proyectar">
+               Abrir Proyección
+            </button>
+          </div>
         </header>
 
         <div className="host-grid">
-          {/* MARCADOR ESTILO ESTADIO */}
           <div className="scoreboard-pro">
             <div className={`team-score ${equipoBate === 'Azul' ? 'bateando' : ''}`}>
               <span className="team-name">EQUIPO AZUL</span>
@@ -266,7 +317,6 @@ function App() {
             </div>
           </div>
 
-          {/* CONTROLES DEL HOST */}
           <div className="controls-panel">
             {!preguntaActual ? (
                 <div className="action-area">
@@ -291,7 +341,7 @@ function App() {
                   <div className="question-header">
                     <span className={`badge ${batazoActual}`}>{batazoActual.toUpperCase()}</span>
                     <span className={`timer-display ${tiempo === 0 ? 'tiempo-agotado' : ''}`}>
-                  {tiempo === 0 ? '🚨 ¡TIEMPO!' : `⏱ ${tiempo}s`}
+                  {tiempo === 0 ? ' ¡TIEMPO!' : `⏱ ${tiempo}s`}
                 </span>
                     <button onClick={() => setTimerActivo(!timerActivo)} className="btn-timer">
                       {timerActivo ? 'PAUSAR' : 'INICIAR'}
@@ -304,10 +354,10 @@ function App() {
 
                   <div className="resolution-buttons">
                     <button onClick={() => resolverJugada(true)} className="btn-resolver correcto">
-                      ✅ CORRECTO
+                       CORRECTO
                     </button>
                     <button onClick={() => resolverJugada(false)} className="btn-resolver fallo">
-                      ❌ FALLÓ (STRIKE)
+                       FALLÓ (STRIKE)
                     </button>
                   </div>
                 </div>
